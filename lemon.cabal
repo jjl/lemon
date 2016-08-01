@@ -1,0 +1,58 @@
+name:                lemon
+version:             0.1.0.0
+synopsis:            A lisp->erlang compiler
+description:         Please see README.md
+homepage:            https://github.com/jjl/lemon
+license:             BSD3
+license-file:        LICENSE
+author:              James Laver
+maintainer:          james@seriesofpipes.com
+copyright:           2016 James Laver
+category:            Web
+build-type:          Simple
+-- extra-source-files:
+cabal-version:       >=1.10
+
+library
+  hs-source-dirs:      src
+  exposed-modules:     Lemon
+                     , Lemon.AST
+                     , Lemon.Compiler
+                     , Lemon.Erlish
+                     , Lemon.Erlish.Bif
+                     , Lemon.Erlish.Data
+                     , Lemon.Erlish.Monad
+                     , Lemon.Erlish.Prim
+                     , Lemon.Interpreter
+                     , Lemon.Lint
+                     , Lemon.Parser
+  build-depends:       base
+                     , bytestring
+                     , containers
+                     , CoreErlang
+                     , lens
+                     , mtl
+                     , parsers
+                     , scientific
+                     , text
+                     , text-conversions
+                     , trifecta
+                     , transformers
+                     , transformers-abort
+                     -- Remove me:
+                     , QuickCheck
+  default-language:    Haskell2010
+
+test-suite lemon-test
+  type:                exitcode-stdio-1.0
+  hs-source-dirs:      test
+  main-is:             Spec.hs
+  build-depends:       base
+                     , lemon
+                     , QuickCheck
+  ghc-options:         -threaded -rtsopts -with-rtsopts=-N
+  default-language:    Haskell2010
+
+source-repository head
+  type:     git
+  location: https://github.com/jjl/lemon
