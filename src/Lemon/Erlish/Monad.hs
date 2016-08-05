@@ -1,7 +1,7 @@
 {-# LANGUAGE FlexibleInstances, OverloadedStrings, TemplateHaskell, TypeSynonymInstances #-}
 module Lemon.Erlish.Monad
   ( Set, Over, Put -- type aliases
-  , lemonade
+  , make
   , getGsc, setGsc, overGsc
   , getScopes, setScopes, overScopes, eitherScopes
   , enscope, descope, unscope, scoped
@@ -20,9 +20,9 @@ import Data.Maybe as M
 import Data.Text (Text)
 import Lemon.Erlish.Data as E
 
--- less tedious then messing with lift
-lemonade :: a -> Lemonade a
-lemonade f = lift (return f)
+-- When life gives you lemons, make Lemonade
+make :: a -> Lemonade a
+make f = lift (return f)
 
 -- _get  :: LENS -> Lemonade a
 -- _set  :: LENS -> a -> Lemonade ()

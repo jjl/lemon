@@ -8,15 +8,13 @@ import Lemon.Erlish.Prim as Prim
 
 erlify :: A.Node -> E.Term
 erlify (A.Number n) = either E.Float E.Int (floatingOrInteger n)
-erlify (A.Char c)   = E.Char c
+erlify (A.Char c)   = E.Int (fromIntegral $ fromEnum c)
 erlify (A.String s) = E.Binary s
 erlify (A.Atom s)   = E.Atom s
 erlify (A.List l)   = E.List (fmap erlify l)
 
 macroexpand1 :: E.Term -> Erlish
-macroexpand1 f@(E.List ((E.Atom s):_)) = findPrim s >>= \p -> case p of
-  Just _ -> return f
-  Nothing -> findMacro s >>= maybe (return f) ($ f)
+macroexpand1 f@(E.List ((E.Atom s):_)) = findMacro s >>= maybe (return f) ($ f)
 macroexpand1 f = return f
 
 macroexpand :: E.Term -> Erlish
@@ -29,5 +27,9 @@ macroexpandAll f = macroexpand f >>= \f2 ->
       do h2 <- scoped $ macroexpandAll h
          rs <- (macroexpandAll $ E.List t)
          cons h2 rs
-    _ -> lemonade f2
+    _ -> make f2
+
+-- eval :: E.Term -> Erlish
+-- eval (E.List l) = ...
+-- eval t = t -- Anything else evaluates to itself
 

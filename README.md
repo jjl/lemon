@@ -4,12 +4,13 @@ Lisp on the Erlang Machine, Only Nicer
 
 ## Status: Pre-alpha
 
-We can't generate code or do several other important things yet, but considering the amount of time that's got in, I'm happy :)
+We can't generate code or do several other important things yet, but considering the amount of time that's gone in, I'm happy :)
 
 Parser: Compiles, definitely buggy
 Bifs: Mostly implemented, some need checking
 Core modules: TODO
 
+If you see a TODO, please fix it!
 
 ## Example
 
@@ -38,6 +39,14 @@ Core modules: TODO
   (ghi 2 3))
 ```
 
+## Overview
+
+The project consists of the following parts:
+
+* A parser for the lemon language
+* The 'Erlish' VM, an interpreter used to expand macros
+* Macros and primitives used by lemon on Erlish
+
 ## Notes
 
 What core erlang modules should we implement?
@@ -46,3 +55,10 @@ candidates:
 *  lists
 *  string
 
+We need to revisit which BIFs etc. to support in light of the fact that we can't avoid a bit more binary smarts.
+
+The AST probably needs some tweaks
+
+We need to translate Erlish back to lemon ASTs
+
+We're pretty sure Text isn't the right type for bitstrings, but we'll fix it later
