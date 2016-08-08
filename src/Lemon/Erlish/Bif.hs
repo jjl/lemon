@@ -1,34 +1,45 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE FlexibleContexts, RankNTypes, OverloadedStrings #-}
 module Lemon.Erlish.Bif where
 
-import Prelude as P
-import Control.Monad.Trans.Except
-import Lemon.Erlish.Monad
+import Control.Lens hiding (List)
+import Control.Monad.Freer
+import Control.Monad.Freer.Exception
 import Lemon.Erlish.Data as E
+import Data.Text (Text)
 import qualified Data.List as L
 import qualified Data.Map as M
+import Prelude as P
+
+type Fun1 = forall r v w. Term v w -> Eff r (Term v w)
+
+type FunError1 = forall r v w. Member (Exc (Error (Term v w))) r
+    => Term v w -> Eff r (Term v w)
+type FunError2 = forall r v w. Member (Exc (Error (Term v w))) r
+    => Term v w -> Term v w -> Eff r (Term v w)
+type FunError3 = forall r v w. Member (Exc (Error (Term v w))) r
+    => Term v w -> Term v w -> Term v w -> Eff r (Term v w)
 
 -- math
 
-abs :: E.Term -> Erlish
-abs (E.Int i)   = return $ E.Int (P.abs i)
-abs (E.Float f) = return $ E.Float (P.abs f)
-abs f = throwE (InvalidArgument "abs/1 takes a number" f)
+abs :: FunError1
+abs (Int n w)   = return $ Int   (P.abs n) w
+abs (Float n w) = return $ Float (P.abs n) w
+abs f = throwError (InvalidArgument "abs/1 takes a number" f)
 
-float :: E.Term -> Erlish
-float (E.Int i)   = return $ E.Float $ fromIntegral i
-float f@(E.Float _) = return f
-float f = throwE (InvalidArgument "float/1 takes a number" f)
+float :: FunError1
+float (Int i w)       = return $ E.Float (fromIntegral i) w
+float f@(E.Float _ _) = return f
+float f = throwError (InvalidArgument "float/1 takes a number" f)
          
-round :: E.Term -> Erlish
-round i@(E.Int _) = return i
-round (E.Float f) = return $ E.Int (P.round f)
-round f = throwE (InvalidArgument "round/1 takes a number" f)
+round :: FunError1
+round i@(E.Int _ _) = return i
+round (E.Float f w) = return $ E.Int (P.round f) w
+round f = throwError (InvalidArgument "round/1 takes a number" f)
 
-trunc :: E.Term -> Erlish
-trunc i@(E.Int _) = return i
-trunc (E.Float f) = return $ E.Int (P.floor f)
-trunc f = throwE (InvalidArgument "trunc/1 takes a number" f)
+trunc :: FunError1
+trunc i@(E.Int _ _) = return i
+trunc (E.Float f w) = return $ E.Int (P.floor f) w
+trunc f = throwError (InvalidArgument "trunc/1 takes a number" f)
 
 -- TODO: type comparisons -- check invariants!
 -- max(term1,term2) -> term
@@ -42,135 +53,135 @@ trunc f = throwE (InvalidArgument "trunc/1 takes a number" f)
 -- TODO: what should we do?
 -- atom_to_binary (atom, latin1|utf8 ) -> binary
 -- atom_to_binary (E.Atom a) (E.Atom "latin1")
--- atom_to_binary (E.Atom a) (E.Atom "utf8") = throwE (InvalidArgument "atom_to_binary/2 not yet implemented" f)
--- atom_to_binary (E.Atom a) f = throwE (InvalidArgument "atom_to_binary/2" f)
--- atom_to_binary f _ = throwE (InvalidArgument "atom_to_binary/2 expects an atom in position 1" f)
+-- atom_to_binary (E.Atom a) (E.Atom "utf8") = throwError (InvalidArgument "atom_to_binary/2 not yet implemented" f)
+-- atom_to_binary (E.Atom a) f = throwError (InvalidArgument "atom_to_binary/2" f)
+-- atom_to_binary f _ = throwError (InvalidArgument "atom_to_binary/2 expects an atom in position 1" f)
 
 -- binary_to_atom (binary, latin1|utf8) -> atom
 
 -- collections:
-erl_append_element :: E.Term -> E.Term -> Erlish
-erl_append_element (E.Tuple t) i = return $ E.Tuple $ t ++ [i]
-erl_append_element f _ = throwE (InvalidArgument "erlang:append_element/2 expects a tuple as first argument" f)
+erl_append_element :: FunError2
+erl_append_element (E.Tuple t w) i = return $ E.Tuple (t ++ [i]) w
+erl_append_element f _ = throwError (InvalidArgument "erlang:append_element/2 expects a tuple as first argument" f)
 
 -- TODO: check my invariants
 -- erl_delete_element:: E.Term -> E.Term -> Erlish
 -- erl_delete_element (E.Int i) (E.Tuple t) = 
--- erl_delete_element (E.Int _) f = throwE (InvalidArgument "erlang:delete_element/2 expects a tuple as second argument" f)
--- erl_delete_element f _ = throwE (InvalidArgument "erlang:delete_element/2 expects an int as first argument" f)
+-- erl_delete_element (E.Int _) f = throwError (InvalidArgument "erlang:delete_element/2 expects a tuple as second argument" f)
+-- erl_delete_element f _ = throwError (InvalidArgument "erlang:delete_element/2 expects an int as first argument" f)
 
-length :: E.Term -> Erlish
-length (E.List l) = return $ E.Int $ fromIntegral (P.length l)
-length f = throwE (InvalidArgument "length/1 expects a list" f)
+length :: FunError1
+length (E.List l w) = return $ E.Int (fromIntegral $ P.length l) w
+length f = throwError (InvalidArgument "length/1 expects a list" f)
 
 -- TODO: check my invariants!
 -- element :: E.Term -> E.Term -> Erlish
--- element (E.Int i) (E.Tuple t) = 
--- element (E.Int i) f = throwE (InvalidArgument "element/2 expects a tuple as second argument" f)
--- element f _ = throwE (InvalidArgument "element/2 expects an int as first argument" f)
+-- element (E.Int i w) (E.Tuple t) = 
+-- element (E.Int i _) f = throwError (InvalidArgument "element/2 expects a tuple as second argument" f)
+-- element f _ = throwError (InvalidArgument "element/2 expects an int as first argument" f)
 
 -- TODO: check my invariants!
--- hd (E.List (h:_)) = return h
--- hd l@(E.List _) = throwE (InvalidArgument "hd/1 called with an empty list" l)
--- hd f = throwE (InvalidArgument "hd/1 expects a non-empty list" f)
+hd :: FunError1
+hd (E.List (h:_) _) = return h
+hd f = throwError (InvalidArgument "hd/1 expects a non-empty list" f)
 
 -- TODO: check my invariants!
 -- erl_insert_element :: E.Term -> E.Term -> E.Term -> Erlish
 -- erl_insert_element (E.Int idx) (T.Tuple t) term = ...
--- erl_insert_element (E.Int _) f _ = throwE (InvalidArgument "erlang:insert_element/3 expects a tuple in position 2" f)
--- erl_insert_element f _ _ = throwE (InvalidArgument "erlang:insert_element/3 expects an int in position 1" f)
+-- erl_insert_element (E.Int _) f _ = throwError (InvalidArgument "erlang:insert_element/3 expects a tuple in position 2" f)
+-- erl_insert_element f _ _ = throwError (InvalidArgument "erlang:insert_element/3 expects an int in position 1" f)
 
-list_to_tuple :: E.Term -> Erlish
-list_to_tuple (E.List l) = return (E.Tuple l)
-list_to_tuple f = throwE (InvalidArgument "list_to_tuple/1 expects a list" f)
+list_to_tuple :: FunError1
+list_to_tuple (E.List l w) = return (E.Tuple l w)
+list_to_tuple f = throwError (InvalidArgument "list_to_tuple/1 expects a list" f)
 
 -- TODO: check my invariants!
-make_tuple2 :: E.Term -> E.Term -> Erlish
-make_tuple2 (E.Int i) t | i > 0 = return (E.List $ L.replicate (fromIntegral i) t)
-make_tuple2 f@(E.Int _) _ = throwE (InvalidArgument "make_tuple/2 expects a positive number" f)
-make_tuple2 f _ = throwE (InvalidArgument "make_tuple/2 expects a number as first argument" f)
+-- make_tuple2 :: E.Term -> E.Term -> Erlish
+-- make_tuple2 (E.Int i) t | i > 0 = return (E.List $ L.replicate (fromIntegral i) t)
+-- make_tuple2 f@(E.Int _) _ = throwError (InvalidArgument "make_tuple/2 expects a positive number" f)
+-- make_tuple2 f _ = throwError (InvalidArgument "make_tuple/2 expects a number as first argument" f)
 -- make_tuple(arity,defaultval,initlist) -> tuple
 
-map_size :: E.Term -> Erlish
-map_size (E.Map m) = return $ E.Int (fromIntegral $ M.size m)
-map_size f = throwE (InvalidArgument "map_size/1 expects a map" f)
+map_size :: FunError1
+map_size (E.Map m w) = return $ E.Int (fromIntegral $ M.size m) w
+map_size f = throwError (InvalidArgument "map_size/1 expects a map" f)
 
 -- TODO: check my invariants
 -- setelement(index,tuple,value) -> tuple
 -- setelement (E.Int i) (E.Tuple t) v = ...
--- setelement (E.Int i) f _ = throwE (InvalidArgument "" f)
--- setelement f _ _ = throwE (InvalidArgument "" f)
+-- setelement (E.Int i) f _ = throwError (InvalidArgument "" f)
+-- setelement f _ _ = throwError (InvalidArgument "" f)
 
 -- TODO: check my invariants
 -- size(tuple|binary) -> value
 -- size (E.Tuple t) = 
 -- size (E.Binary b) =
--- size f = throwE (InvalidArgument "size/1 expects a tuple or a binary" f)
+-- size f = throwError (InvalidArgument "size/1 expects a tuple or a binary" f)
 
 -- TODO: check my invariants
 -- tl(list) -> list (tail)
 -- tl (E.List (h:t)) = ...
--- tl f = throwE (InvalidArgument "tl/1 expects a non-empty list" f)
+-- tl f = throwError (InvalidArgument "tl/1 expects a non-empty list" f)
 
-tuple_size :: E.Term -> Erlish
-tuple_size (E.Tuple t) = return $ E.Int (fromIntegral $ P.length t)
-tuple_size f = throwE (InvalidArgument "tuple_size/1 expects a tuple" f)
+tuple_size :: FunError1
+tuple_size (E.Tuple t w) = return $ E.Int (fromIntegral $ P.length t) w
+tuple_size f = throwError (InvalidArgument "tuple_size/1 expects a tuple" f)
 
-tuple_to_list :: E.Term -> Erlish
-tuple_to_list (E.Tuple t) = return (E.List t)
-tuple_to_list f = throwE (InvalidArgument "tuple_to_list/1 expects a tuple" f)
+tuple_to_list :: FunError1
+tuple_to_list (E.Tuple t w) = return (E.List t w)
+tuple_to_list f = throwError (InvalidArgument "tuple_to_list/1 expects a tuple" f)
 
 -- Type tests
 -- is_function -> bool
 
-_bool :: Bool -> Erlish
-_bool = return . E.Bool 
+_at :: Text -> Term v w -> Eff r (Term v w)
+_at n l = return $ Atom n (l ^. tCont)
+is_atom :: Fun1
+is_atom (Atom _ w) = return $ Atom "true" w
+is_atom l          = _at "false" l
 
-is_atom :: E.Term -> Erlish
-is_atom (E.Atom _) = _bool True
-is_atom _ = _bool False
+is_binary :: Fun1
+is_binary b@(E.Binary _ _) = _at "true" b
+is_binary b = _at "false" b
 
-is_binary :: E.Term -> Erlish
-is_binary (E.Binary _) = _bool True
-is_binary _ = _bool False
+is_boolean :: Fun1
+is_boolean b@(E.Atom a _) = _at h b
+    where h = if a `elem` ["true","false"] then "true" else "false"
+is_boolean b = _at "false" b
 
-is_boolean :: E.Term -> Erlish
-is_boolean (E.Bool _) = _bool True
-is_boolean _ = _bool False
+is_float :: Fun1
+is_float f@(E.Float _ _) = _at "true" f
+is_float f = _at "false" f
 
-is_float :: E.Term -> Erlish
-is_float (E.Float _) = _bool True
-is_float _ = _bool False
+is_integer :: Fun1
+is_integer i@(E.Int _ _) = _at "true" i
+is_integer i = _at "false" i
 
-is_integer :: E.Term -> Erlish
-is_integer (E.Int _) = _bool True
-is_integer _ = _bool False
+is_list :: Fun1
+is_list l@(E.List _ _) = _at "true" l
+is_list l = _at "false" l
 
-is_list :: E.Term -> Erlish
-is_list (E.List _) = _bool True
-is_list _ = _bool False
+is_map :: Fun1
+is_map m@(E.Map _ _) = _at "true" m
+is_map m = _at "false" m
 
-is_map :: E.Term -> Erlish
-is_map (E.Map _) = _bool True
-is_map _ = _bool False
+is_number :: Fun1
+is_number n@(E.Int _ _)   = _at "true" n
+is_number n@(E.Float _ _) = _at "true" n
+is_number n = _at "false" n
 
-is_number :: E.Term -> Erlish
-is_number (E.Int _) = _bool True
-is_number (E.Float f) = _bool True
-is_number _ = _bool False
+is_tuple :: Fun1
+is_tuple t@(E.Tuple _ _) = _at "true" t
+is_tuple t = _at "false" t
 
-is_tuple :: E.Term -> Erlish
-is_tuple (E.Tuple _) = _bool True
-is_tuple _ = _bool False
+-- -- Binaries
 
--- Binaries
+-- -- split_binary(bin,pos) -> tuple(binary,binary)
 
--- split_binary(bin,pos) -> tuple(binary,binary)
-
--- misc:
-error :: E.Term -> Erlish
-error (E.Binary b) = throwE (RuntimeError b)
-error f = throwE (InvalidArgument "error/1 (of all things!) takes a binary" f)
+-- -- misc:
+-- error :: E.Term -> Erlish
+-- error (E.Binary b) = throwError (RuntimeError b)
+-- error f = throwError (InvalidArgument "error/1 (of all things!) takes a binary" f)
 
 -- not convinced:
 -- binary_to_existing_atom (binary,encoding)

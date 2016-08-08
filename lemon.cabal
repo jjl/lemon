@@ -1,7 +1,7 @@
 name:                lemon
 version:             0.1.0.0
 synopsis:            A lisp->erlang compiler
-description:         Please see README.md
+description:         Lisp on the Erlang Machine, Only Nicer.
 homepage:            https://github.com/jjl/lemon
 license:             BSD3
 license-file:        LICENSE
@@ -18,7 +18,10 @@ library
   exposed-modules:     Lemon
                      , Lemon.AST
                      , Lemon.Compiler
+                     , Lemon.Effect.Gensym
+                     , Lemon.Effect.Stack
                      , Lemon.Erlish
+                     , Lemon.Erlish.Abstract
                      , Lemon.Erlish.Bif
                      , Lemon.Erlish.Data
                      , Lemon.Erlish.Monad
@@ -30,6 +33,7 @@ library
                      , bytestring
                      , containers
                      , CoreErlang
+                     , freer
                      , lens
                      , mtl
                      , parsers
