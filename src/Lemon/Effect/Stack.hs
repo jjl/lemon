@@ -1,7 +1,6 @@
 {-# LANGUAGE AllowAmbiguousTypes, DataKinds, FlexibleContexts, TypeOperators #-}
 module Lemon.Effect.Stack
-  ( push, peek, pop
-  , runStack
+  ( push, peek, pop -- , dup
   ) where
 
 import Lemon.Erlish.Data
@@ -25,6 +24,3 @@ pop = get >>= \st -> case st of
 -- dup :: Member (St.State [s]) r => Eff r ()
 -- dup = peek >>= push
 
--- runStack :: [s] -> Eff (St.State [s] : r) w -> Eff r (w,[s])
-
-runStack = St.runState

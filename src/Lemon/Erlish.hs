@@ -1,10 +1,12 @@
-{-# LANGUAGE AllowAmbiguousTypes, DataKinds, FlexibleContexts,
-             RankNTypes, TypeOperators, ViewPatterns #-}
+{-# LANGUAGE AllowAmbiguousTypes, DataKinds, FlexibleContexts, KindSignatures, RankNTypes,
+             ScopedTypeVariables, TypeOperators, ViewPatterns #-}
 module Lemon.Erlish where
 
 import Control.Applicative
+import Control.Arrow
 import Control.Lens hiding (List)
 import Control.Monad.Freer
+import Control.Monad.Freer.Fresh
 import Control.Monad.Freer.Internal
 import Control.Monad.Freer.Exception
 import Control.Monad.Freer.State as St
@@ -13,12 +15,11 @@ import Data.Map.Strict as M hiding (mapMaybe)
 import Data.Scientific (floatingOrInteger)
 import Data.Text (Text)
 import Lemon.AST as A
-import Lemon.Effect.Gensym
 import Lemon.Effect.Stack as Stack
 import Lemon.Erlish.Monad
 import Lemon.Erlish.Data as E
 import Lemon.Erlish.Prim as Prim
-import Prelude as P hiding (get)
+import Prelude as P hiding (get, lookup)
 
 -- termify :: Node -> Term v w
 -- termify (Number n) = either E.Float E.Int (floatingOrInteger n)
@@ -27,69 +28,74 @@ import Prelude as P hiding (get)
 -- termify (A.Atom s) = E.Atom s
 -- termify (A.List l) = E.List (fmap termify l)
 
--- getGlobal :: Lens' (Global t v w) a -> Eff '[State (Global t v w)] a
--- getGlobal l = get >>= return . (view l)
--- eitherGlobal l f = get >>= \g -> either id throwError (g ^. l)
+type Arr' r a = Arr r a a
 
--- withGlobal :: (Global t v w -> 
+orDo :: Monad m => m (Maybe a) -> Maybe a -> m (Maybe a)
+orDo _ j@(Just _) = return j
+orDo f Nothing = f
 
-findLexical :: Member (State [Scope v w]) r =>
-               (Scope v w -> Maybe a) -> Eff r (Maybe a)
-findLexical t = fmap (listToMaybe . mapMaybe t) get
+findCurrent :: Member (State (Global v w)) r => Eff r (Maybe (Module v w))
+findCurrent = get >>= \g -> return $ case (g ^. current) of
+  Just m -> (lookupModule m g)
+  Nothing -> Nothing
 
-onGlobalScope :: (Scope v w -> a) -> Eff '[State (Global v w)] a
-onGlobalScope f = fmap (f . (^. builtins)) get
+findInGlobal :: Member (State (Global v w)) r => Arr r (ModScope v w -> Maybe a) (Maybe a)
+findInGlobal f = fmap (lookupBuiltin f) get
 
-onModule :: Text -> (Maybe (Module v w) -> a) -> Eff '[State (Global v w)] a
-onModule n f = fmap (\g -> f $ M.lookup n (g ^. mods)) get
+findInStack :: Member (State [Scope  v w]) r => Arr r (Scope v w -> Maybe a) (Maybe a)
+findInStack f = fmap (lookupStack f) get
 
--- getCurrentModule :: Eff '[State (Global v w)] (Maybe Text)
--- getCurrentModule = fmap (^. current) get
+findInModule :: Member (State (Global v w)) r => (Module v w -> Maybe a) -> Arr r Text (Maybe a)
+findInModule f n = h `fmap` get
+  where h g = maybe Nothing f (lookupModule n g)
 
--- onCurrentModule :: (Maybe (Module v w) -> a) -> Eff '[State (Global v w)] a
--- onCurrentModule f = get >>= \g -> case (g ^. current) of
---   Just j -> onModule j f
---   Nothing -> return (f Nothing)
--- onCurrentModule :: (Maybe (Module v w) -> a) -> Eff '[State (Global v w)] a
--- onCurrentModule f = get >>= \g -> case g ^. current of
---   Just j -> onModule j f
---   Nothing -> return $ f Nothing
+findInCurrent :: Member (State (Global v w)) r => Arr r (ModScope v w -> Maybe a) (Maybe a)
+findInCurrent f = h `fmap` findCurrent 
+  where h = maybe Nothing (f . (^. modScope))
 
-lookupFun :: Text -> Int -> Scope v w -> Maybe (Fun (Term v w) v w)
-lookupFun n a s = M.lookup (n,a) (s ^. scopeFuns)
+findAnywhere :: Members [State (Global v w), State [Scope v w]] r
+                => (Scope v w -> Maybe a) -> Arr r (ModScope v w -> Maybe a) (Maybe a)
+findAnywhere f f2 = findInStack f >>= orDo (findInCurrent f2) >>= orDo (findInGlobal f2)
 
-lookupMac :: Text -> Scope v w -> Maybe (Macro (Term v w) v w)
-lookupMac n s = M.lookup n (s ^. scopeMacs)
+findFun :: Members [State (Global v w), State [Scope  v w]] r
+           => Arr r (Text,Int) (Maybe (Fun (Term v w) v w))
+findFun na = findAnywhere (sLookupFun na) (mLookupFun na)
 
-lookupVal :: Text -> Scope v w -> Maybe (Term v w)
-lookupVal n s = M.lookup n (s ^. scopeVals)
+findMacro :: Members [State (Global v w), State [Scope  v w]] r
+             => Arr r Text (Maybe (Macro (Term v w) v w))
+findMacro n = findAnywhere (sLookupMacro n) (mLookupMacro n)
 
-orDo :: Monad m => Maybe a -> m (Maybe a) -> m (Maybe a)
-orDo j@(Just _) _ = return j
-orDo Nothing f = f
+findMod :: Member (State (Global v w)) r => Arr r Text (Maybe (Module v w))
+findMod   n = fmap (lookupModule n) get
 
--- The types on these do not make sense to me yet but they return Eff r (Maybe a)
-findHelper f _f2 = (findLexical f) >>= help2
-  where -- help g = g `orDo` onModule f2
-        help2 g = g `orDo` onGlobalScope f
-findFun n a = findHelper (lookupFun n a) (maybe Nothing help)
-  where help m = M.lookup (n,a) (m ^. modFuns)
-findMacro n = findHelper (lookupMac n) id
-findMod   n = fmap (M.lookup n . (^. mods)) get
-findVal   n = findLexical (lookupVal n)
+findVal :: Member (State [Scope  v w]) r => Arr r Text (Maybe (Term v w))
+findVal   n = fmap (lookupStack (sLookupVal n)) get
 
--- runPrimitiveMacro :: Macro (Term v w) v w -> [Term v w] -> Eff w (Term v w)
--- runPrimitiveMacro m ts = m2 (E.List ts)
---   where m2 :: (Term v w) -> Eff w (Term v w)
---         m2 = view macMac m
-
--- runMacro :: Macro (Term v w) v w -> [Term v w] -> Eff w (Term v w)
--- runMacro m ts | isPrimitive m = (m ^. macMac) (E.List ts)
+-- TODO: User macros
+runMacro :: Monoid (Eff w (Term v w)) => Macro (Term v w) v w -> Arr' w (Term v w)
+runMacro m ts | isPrimitive m = (m ^. macMac) ts
 -- runMacro m ts = return 
 
--- macroexpand1 t@(E.List ((E.Atom s):is)) =
---   findMacro s >>= \m -> case m of
---     Just m ->
+
+-- Inco
+macroexpand1 :: forall r v w. Arr r Text Bool
+macroexpand1 s = m' >>= \m -> return $ case m of
+    Just j  -> True
+    Nothing -> False
+  where m' :: forall r v1 w1. Eff r (Maybe (Macro (Term v1 w1) v1 w1))
+        m' = findMacro s
+-- macroexpand1 :: Members [State (Global v w), State [Scope  v w]] r => Arr' r (Term v w)
+-- macroexpand1 t@(E.List ((E.Atom s w1):is) w) = findMacro s >>= expand
+-- --  Just j -> runMacro j (E.List is w) -- WTF about the infinite type?
+--   -- Nothing -> return t --return $ E.List  is w --case m of
+--   where expand (Just m) = return t
+--         expand _ = return t
+-- macroexpand1 t = return t
+
+-- macroexpand1 :: Term v w -> Eff (State (Global v w) ': State [Scope v w] ': r) (Term v w)
+-- macroexpand1 t@(E.List ((E.Atom s _):is) v) = do m <- findMacro s
+--                                                  return (E.List is v) -- 
+-- macroexpand1 t = return t
 
 -- macroexpand1 f@(List ((Atom s):_)) = findMacro s >>= maybe (return f) ($ f)
 -- macroexpand1 :: E.Term -> Erlish
@@ -108,14 +114,13 @@ findVal   n = findLexical (lookupVal n)
 --          cons h2 rs
 --     _ -> make f2
 
--- runErlish :: Prims v w ->
---              Global (Term v w) w ->
---              [Lexical (Term v w) v] ->
---              Eff '[ State [Lexical (Term v w) v]
---                   , Gensym
---                   , Reader (Global (Term v w) w)] v ->
---              Eff r (v,[Lexical (Term v w) v])
-runErlish g ls = run . runState g . runGensym . runStack ls
+runErlish :: (Global v w) -> [Scope v w]
+            -> Eff '[State [Scope v w], Fresh, State (Global v w)] v
+            -> ((v, [Scope v w]), Global v w)
+runErlish g ls = run . runGlobal g . runGensym 0 . runLexicals ls
+  where runGlobal    = flip runState
+        runGensym    = flip runFresh'
+        runLexicals  = flip runState
 
 --runAndTrace ls = runTrace . runErlish ls
 -- eval :: E.Term -> Erlish

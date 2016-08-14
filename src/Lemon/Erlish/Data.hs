@@ -14,7 +14,9 @@ import Control.Monad.Freer
 import Control.Monad.Freer.Exception
 import Control.Monad.Freer.Fresh
 import Control.Monad.Freer.State
-import Data.Map.Strict as M hiding (map)
+import Data.Map.Strict as M hiding (map, mapMaybe)
+import Data.Maybe as Maybe
+import Data.Scientific
 import Data.Text (Text)
 import Prelude as P hiding (map)
 
@@ -41,7 +43,7 @@ type TermMap v w = Map (Term v w) (Term v w)
 type ErlyFun v w = Fun (Term v w) v w
 
 data Term v w = Int    { _tInt   :: Integer,     _tCont :: v }
-              | Float  { _tFloat :: Double,      _tCont :: v }
+              | Float  { _tFloat :: Scientific,  _tCont :: v }
               | Atom   { _tText  :: Text,        _tCont :: v }
               | Binary { _tText  :: Text,        _tCont :: v } -- TODO: bytestring me?
               | Tuple  { _tItems :: [Term v w],  _tCont :: v }
@@ -59,10 +61,13 @@ instance UserDefinable (Macro t v w) where
   isPrimitive (PrimMacro{..}) = True
   isPrimitive _ = False
 
-data Module v w = Module { _modName :: Text
-                         , _modMeta :: Map Text       (Term v w)
-                         , _modMacs :: Map Text       (Macro (Term v w) v w)
-                         , _modFuns :: Map (Text,Int) (Fun (Term v w) v w) }
+data ModScope v w = ModScope { _msMacs :: Map Text       (Macro (Term v w) v w)
+                             , _msFuns :: Map (Text,Int) (Fun (Term v w) v w) }
+makeLenses ''ModScope
+
+data Module v w = Module { _modName  :: Text
+                         , _modMeta  :: Map Text       (Term v w)
+                         , _modScope :: ModScope v w }
 makeLenses ''Module
 
 data Match v w = Match (Term v w) (Term v w)
@@ -72,13 +77,37 @@ data Scope v w = Scope { _scopeFuns :: Map (Text,Int) (Fun (Term v w) v w)
                        , _scopeVals :: Map Text (Term v w)}
 makeLenses ''Scope
 
-data Global v w = Global { _builtins :: Scope v w
+data Global v w = Global { _builtins :: ModScope v w
                          , _mods     :: Map Text (Module v w)
                          , _current  :: Maybe Text }
 makeLenses ''Global
 
 type Globals  v w = State (Global v w) v
 type Lexicals v w = State [Scope v w] v
+
+lookupStack :: (Scope v w -> Maybe a) -> [Scope v w] -> Maybe a
+lookupStack t = listToMaybe . mapMaybe t
+
+lookupBuiltin :: (ModScope v w -> Maybe a) -> Global v w -> Maybe a
+lookupBuiltin f g = f (g ^. builtins)
+
+lookupModule :: Text -> Global v w -> Maybe (Module v w)
+lookupModule n g = M.lookup n (g ^. mods)
+
+sLookupFun :: (Text,Int) -> Scope v w -> Maybe (Fun (Term v w) v w)
+sLookupFun k s = M.lookup k (s ^. scopeFuns)
+
+sLookupMacro :: Text -> Scope v w -> Maybe (Macro (Term v w) v w)
+sLookupMacro n s = M.lookup n (s ^. scopeMacs)
+
+sLookupVal :: Text -> Scope v w -> Maybe (Term v w)
+sLookupVal n s = M.lookup n (s ^. scopeVals)
+
+mLookupFun :: (Text,Int) -> ModScope v w -> Maybe (Fun (Term v w) v w)
+mLookupFun k s = M.lookup k (s ^. msFuns)
+
+mLookupMacro :: Text -> ModScope v w -> Maybe (Macro (Term v w) v w)
+mLookupMacro k s = M.lookup k (s ^. msMacs)
 
 -- In Erlang, there is a global ordering of terms. So it is for our subset
 scoreTerm :: Term v w -> Int
@@ -178,37 +207,8 @@ scoreTermForMap o = scoreTerm o
 -- instance Ord Term where
 --   compare = compareTerms
 
--- nil :: Term
--- nil = List []
-
 -- data Location = Location
 --   { _line :: Int, _col :: Int } deriving (Eq, Show)
 
--- type Macro = Term -> Erlish
 
--- data Scope = Scope { _macros :: Map Text Macro
---                    , _funcs  :: Map Text Func
---                    , _binds  :: Map Text Term }
 
--- emptyScope :: Scope
--- emptyScope = Scope M.empty M.empty M.empty
-
--- data LemonState = LemonState { _scopes :: [Scope]
---                              , _gsc :: Int
---                              , _prims :: Map Text Macro }
-
--- emptyState :: LemonState
--- emptyState = LemonState [emptyScope] 0 M.empty
-
--- data LemonError = InvalidArgument Text Term
---                 | RuntimeError Text
---                 | StackEmpty
-                
--- type Lemonade = ExceptT LemonError (State LemonState)
-  
--- type Erlish = Lemonade Term
-
--- makeLenses ''Func
--- makeLenses ''Location
--- makeLenses ''Scope
--- makeLenses ''LemonState
