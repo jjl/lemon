@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts, RankNTypes, OverloadedStrings #-}
+{-# LANGUAGE FlexibleContexts, RankNTypes, OverloadedStrings, ScopedTypeVariables #-}
 module Lemon.Erlish.Bif where
 
 import Control.Lens hiding (List)
@@ -12,11 +12,11 @@ import Prelude as P
 
 type Fun1 = forall r v w. Term v w -> Eff r (Term v w)
 
-type FunError1 = forall r v w. Member (Exc (Error (Term v w))) r
+type FunError1 = forall r v w. WithError r v w
     => Term v w -> Eff r (Term v w)
-type FunError2 = forall r v w. Member (Exc (Error (Term v w))) r
+type FunError2 = forall r v w. WithError r v w
     => Term v w -> Term v w -> Eff r (Term v w)
-type FunError3 = forall r v w. Member (Exc (Error (Term v w))) r
+type FunError3 = forall r v w. WithError r v w
     => Term v w -> Term v w -> Term v w -> Eff r (Term v w)
 
 -- math
@@ -134,7 +134,7 @@ tuple_to_list f = throwError (InvalidArgument "tuple_to_list/1 expects a tuple" 
 -- Type tests
 -- is_function -> bool
 
-_at :: Text -> Term v w -> Eff r (Term v w)
+_at :: forall r v w. Text -> Term v w -> Eff r (Term v w)
 _at n l = return $ Atom n (l ^. tCont)
 is_atom :: Fun1
 is_atom (Atom _ w) = return $ Atom "true" w

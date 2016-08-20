@@ -1,5 +1,6 @@
-{-# LANGUAGE DataKinds, GADTs, KindSignatures,
-    MultiParamTypeClasses, RecordWildCards, TemplateHaskell #-}
+{-# LANGUAGE ConstraintKinds, DataKinds, GADTs, FlexibleInstances,
+             FlexibleContexts, KindSignatures, MultiParamTypeClasses, RankNTypes,
+             RecordWildCards, TemplateHaskell, TypeSynonymInstances #-}
 module Lemon.Erlish.Data where
   -- ( UserDefinable(..)
   -- , Error(..), Fun(..), Term(..), Macro(..), Module(..), 
@@ -11,12 +12,14 @@ module Lemon.Erlish.Data where
 
 import Control.Lens hiding (List)
 import Control.Monad.Freer
+import Control.Monad.Freer.Internal
 import Control.Monad.Freer.Exception
 import Control.Monad.Freer.Fresh
 import Control.Monad.Freer.State
 import Data.Map.Strict as M hiding (map, mapMaybe)
 import Data.Maybe as Maybe
 import Data.Scientific
+import qualified Data.Set as Set
 import Data.Text (Text)
 import Prelude as P hiding (map)
 
@@ -27,13 +30,18 @@ class UserDefinable a where
   isUserDefined = not . isPrimitive
 
 data Error form = InvalidArgument Text form
+                | Unimplemented Text
                 | StackEmpty
                 | RuntimeError Text
 
-data Fun t v w = PrimFun { _funMeta :: Map t t
-                         , _funFun  :: t -> Eff w t }
-               | UserFun { _funMeta :: Map t t }
+data Fun t v w = PrimFun   { _funFun  :: t -> Eff w t }
+               | Defn      { _funFun  :: t -> Eff w t, _funSource :: [t] }
+               | Defns     { _funFun  :: t -> Eff w t, _funSource :: [t] }
+data Macro t w = PrimMacro { _macMac  :: Arr w t t }
+               | Defmacro  { _macMac  :: Arr w t t,    _macSource :: [t] }
+               | Defmacros { _macMac  :: Arr w t t,    _macSource :: [t] }
 makeLenses ''Fun
+makeLenses ''Macro
 
 instance UserDefinable (Fun t v w) where
   isPrimitive (PrimFun{..}) = True
@@ -41,6 +49,7 @@ instance UserDefinable (Fun t v w) where
 
 type TermMap v w = Map (Term v w) (Term v w)
 type ErlyFun v w = Fun (Term v w) v w
+type ErlyMac v w = Macro (Term v w) w
 
 data Term v w = Int    { _tInt   :: Integer,     _tCont :: v }
               | Float  { _tFloat :: Scientific,  _tCont :: v }
@@ -51,29 +60,70 @@ data Term v w = Int    { _tInt   :: Integer,     _tCont :: v }
               | Map    { _tMap   :: TermMap v w, _tCont :: v }
               | Fun    { _tFun   :: ErlyFun v w, _tCont :: v }
 makeLenses ''Term
-
-data Macro t v w = PrimMacro { _macMeta :: Map t t
-                             , _macMac  :: t -> Eff w t }
-                 | UserMacro { _macMeta :: Map t t }
-makeLenses ''Macro
-
-instance UserDefinable (Macro t v w) where
+instance Eq (Term v w) where
+    (==) (Int v1 _)    (Int v2 _)    = v1 == v2
+    (==) (Float v1 _)  (Float v2 _)  = v1 == v2
+    (==) (Atom v1 _)   (Atom v2 _)   = v1 == v2
+    (==) (Binary v1 _) (Binary v2 _) = v1 == v2
+    (==) (Tuple v1 _)  (Tuple v2 _)  = v1 == v2
+    (==) (List v1 _)   (List v2 _)   = v1 == v2
+    (==) (Map v1 _)    (Map v2 _)    = v1 == v2
+    -- (==) (Fun v1 _) (Fun v2 _) = v1 == v2
+instance UserDefinable (Macro t v) where
   isPrimitive (PrimMacro{..}) = True
   isPrimitive _ = False
 
-data ModScope v w = ModScope { _msMacs :: Map Text       (Macro (Term v w) v w)
-                             , _msFuns :: Map (Text,Int) (Fun (Term v w) v w) }
+type Metadata v w = Map (Term v w) (Term v w)
+
+data ModScope v w = ModScope { _msMacs :: Map Text       (Macro (Term v w) w, Metadata v w)
+                             , _msFuns :: Map (Text,Int) (Fun (Term v w) v w, Metadata v w) }
 makeLenses ''ModScope
 
-data Module v w = Module { _modName  :: Text
-                         , _modMeta  :: Map Text       (Term v w)
-                         , _modScope :: ModScope v w }
+data FunExp    = WildcardFE  | AritiesFE { _funExpArities  :: Set.Set Int }
+data FunsExp   = WildcardFsE | NamesFsE  { _funsExpNames   :: Map Text FunExp }
+data MacrosExp = WildcardMsE | NamesMsE  { _macrosExpNames :: Set.Set Text }
+data ModExps = ModExps { _modExportsFuns :: Map Text FunExp, _modExportsMacros :: MacrosExp }
+
+makeLenses ''FunExp
+makeLenses ''FunsExp
+makeLenses ''MacrosExp
+makeLenses ''ModExps
+
+instance Monoid FunExp where
+  mempty = AritiesFE Set.empty
+  mappend WildcardFE _ = WildcardFE
+  mappend _ WildcardFE = WildcardFE
+  mappend (AritiesFE a) (AritiesFE b) = AritiesFE (mappend a b)
+
+instance Monoid FunsExp where
+  mempty = NamesFsE M.empty
+  mappend WildcardFsE _ = WildcardFsE
+  mappend _ WildcardFsE = WildcardFsE
+  mappend (NamesFsE a) (NamesFsE b) = NamesFsE (mappend a b)
+
+instance Monoid MacrosExp where
+  mempty = NamesMsE Set.empty
+  mappend WildcardMsE _ = WildcardMsE
+  mappend _ WildcardMsE = WildcardMsE
+  mappend (NamesMsE a) (NamesMsE b) = NamesMsE (mappend a b)
+
+
+
+
+data ModMeta v w = ModMeta { _modMetaMod  :: Metadata v w
+                           , _modMetaFuns :: Map (Text,Int) (Metadata v w)
+                           , _modMetaMacs :: Map Text (Metadata v w) }
+
+data Module v w = Module { _modName    :: Text
+                         , _modMeta    :: ModMeta v w
+                         , _modExports :: ModExps
+                         , _modScope   :: ModScope v w }
 makeLenses ''Module
 
 data Match v w = Match (Term v w) (Term v w)
 
 data Scope v w = Scope { _scopeFuns :: Map (Text,Int) (Fun (Term v w) v w)
-                       , _scopeMacs :: Map Text       (Macro (Term v w) v w)
+                       , _scopeMacs :: Map Text       (Macro (Term v w) w)
                        , _scopeVals :: Map Text (Term v w)}
 makeLenses ''Scope
 
@@ -84,6 +134,20 @@ makeLenses ''Global
 
 type Globals  v w = State (Global v w) v
 type Lexicals v w = State [Scope v w] v
+
+type WithError  r v w = Member (Exc (Error (Term v w))) r
+type WithGlobal r v w = Member (State (Global v w)) r
+type WithStack  r v w = Member (State [Scope v w]) r
+type WithFresh  r     = Member Fresh r
+type WithEG     r v w = Members [Exc (Error (Term v w)), State (Global v w)] r
+type WithES     r v w = Members [Exc (Error (Term v w)), State [Scope v w]] r
+type WithEGS    r v w = Members [Exc (Error (Term v w)), State (Global v w), State [Scope v w]] r
+type WithGS     r v w = Members [State (Global v w), State [Scope v w]] r
+type WithAll    r v w = Members [Exc (Error (Term v w)), State (Global v w), State [Scope v w], Fresh] r
+
+type Monoidal v w = Monoid (Eff w (Term v w))
+
+type Arr' r a = Arr r a a
 
 lookupStack :: (Scope v w -> Maybe a) -> [Scope v w] -> Maybe a
 lookupStack t = listToMaybe . mapMaybe t
@@ -97,34 +161,47 @@ lookupModule n g = M.lookup n (g ^. mods)
 sLookupFun :: (Text,Int) -> Scope v w -> Maybe (Fun (Term v w) v w)
 sLookupFun k s = M.lookup k (s ^. scopeFuns)
 
-sLookupMacro :: Text -> Scope v w -> Maybe (Macro (Term v w) v w)
+sLookupMacro :: Text -> Scope v w -> Maybe (Macro (Term v w) w)
 sLookupMacro n s = M.lookup n (s ^. scopeMacs)
 
 sLookupVal :: Text -> Scope v w -> Maybe (Term v w)
 sLookupVal n s = M.lookup n (s ^. scopeVals)
 
-mLookupFun :: (Text,Int) -> ModScope v w -> Maybe (Fun (Term v w) v w)
-mLookupFun k s = M.lookup k (s ^. msFuns)
+mLookupFunAndMeta :: forall v w. (Text,Int) -> ModScope v w -> Maybe (Fun (Term v w) v w, Metadata v w)
+mLookupFunAndMeta k s = M.lookup k (s ^. msFuns)
 
-mLookupMacro :: Text -> ModScope v w -> Maybe (Macro (Term v w) v w)
-mLookupMacro k s = M.lookup k (s ^. msMacs)
+mLookupFun :: forall v w. (Text,Int) -> ModScope v w -> Maybe (Fun (Term v w) v w)
+mLookupFun na s = fmap fst (mLookupFunAndMeta na s)
+
+mLookupFunMeta :: forall v w. (Text,Int) -> ModScope v w -> Maybe (Metadata v w)
+mLookupFunMeta na s = fmap snd (mLookupFunAndMeta na s)
+
+mLookupMacroAndMeta :: forall v w. Text -> ModScope v w -> Maybe (Macro (Term v w) w, Metadata v w)
+mLookupMacroAndMeta k s = M.lookup k (s ^. msMacs)
+
+mLookupMacro :: Text -> ModScope v w -> Maybe (Macro (Term v w) w)
+mLookupMacro k s = fmap fst (mLookupMacroAndMeta k s)
+
+mLookupMacroMeta :: forall v w. Text -> ModScope v w -> Maybe (Metadata v w)
+mLookupMacroMeta n s = fmap snd (mLookupMacroAndMeta n s)
 
 -- In Erlang, there is a global ordering of terms. So it is for our subset
-scoreTerm :: Term v w -> Int
-scoreTerm (Int _ _)    = 1
-scoreTerm (Float _ _)  = 1
-scoreTerm (Atom _ _)   = 2
-scoreTerm (Fun _ _)    = 3
-scoreTerm (Tuple _ _)  = 4
-scoreTerm (Map _ _)    = 5
-scoreTerm (List _ _)   = 6
-scoreTerm (Binary _ _) = 7
+scoreTermLax :: Term v w -> Int
+scoreTermLax (Int _ _)    = 1
+scoreTermLax (Float _ _)  = 1
+scoreTermLax (Atom _ _)   = 2
+scoreTermLax (Fun _ _)    = 3
+scoreTermLax (Tuple _ _)  = 4
+scoreTermLax (Map _ _)    = 5
+scoreTermLax (List _ _)   = 6
+scoreTermLax (Binary _ _) = 7
 
 -- Maps are a special case whereby ints score lower than floats
 -- I Blame "Hello, " Robert
-scoreTermForMap :: Term v w -> Int
-scoreTermForMap (Int _ _) = 0
-scoreTermForMap o = scoreTerm o
+-- This does however mean we have a unique integer for each type
+scoreTermStrong :: Term v w -> Int
+scoreTermStrong (Int _ _) = 0
+scoreTermStrong o = scoreTermLax o
 
 -- toFloat :: Term -> Double
 -- toFloat (Int i)   = fromIntegral i

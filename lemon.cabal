@@ -26,23 +26,20 @@ library
                      , Lemon.Erlish.Data
                      , Lemon.Erlish.Monad
                      , Lemon.Erlish.Prim
-                     , Lemon.Interpreter
                      , Lemon.Lint
                      , Lemon.Parser
+                     , Lemon.Util
   build-depends:       base
                      , bytestring
                      , containers
                      , CoreErlang
                      , freer
                      , lens
-                     , mtl
                      , parsers
                      , scientific
                      , text
                      , text-conversions
                      , trifecta
-                     , transformers
-                     , transformers-abort
                      -- Remove me:
                      , QuickCheck
   default-language:    Haskell2010

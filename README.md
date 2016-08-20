@@ -16,7 +16,16 @@ If you see a TODO, please fix it!
 
 ```lemon
 (defmodule foo.bar
-  (export (abc 0 2) (def 2)))
+  "A sample docstring"
+  {drunkenness 9000}          ; arbitrary metadata
+  (export (abc 0 2) (def 2)) ; export named functions/arities
+  ;; (export *)               ; export all functions
+  ;; (export (abc *))         ; export all arities of abc
+  ;; (export-macros foo bar)  ; export these macros
+  ;; (export-macros *)        ; export all macros
+  (import (alias long-module lm))) ;; alias a module
+  ;; (import (from module (foo *) (bar 2 3)))
+  ;; (attrs (name1 v1 v2) (name2 v2_1))
 
 (defns abc
   {} ; metadata, optional

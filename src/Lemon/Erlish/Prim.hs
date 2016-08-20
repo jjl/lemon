@@ -1,65 +1,121 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE FlexibleContexts, OverloadedStrings, RankNTypes, ScopedTypeVariables, TypeApplications, ViewPatterns #-}
 module Lemon.Erlish.Prim where
 
-import Control.Monad.Trans.Except
-import Lemon.Erlish.Abstract
-import Lemon.Erlish.Monad
-import Lemon.Erlish.Data as E
+import Control.Monad.Freer
+import Control.Monad.Freer.Exception
+import Control.Monad.Freer.Internal
+import Control.Monad.Freer.State
 import Data.Map.Strict as M (Map, empty, lookup, insert)
+import Lemon.Erlish.Abstract
+-- import Lemon.Erlish.Monad
+import Lemon.Erlish.Data as E
+import Lemon.Util as U
 import Prelude hiding (map, error)
 import qualified Prelude as P
 
+car', cdr' :: Errory r v w
+car' (E.List (h:_) _) = return h
+car' t = throwError (InvalidArgument "car requires a non-empty list" t)
+cdr' (E.List (_:t) w) = return (E.List t w)
+cdr' t = throwError (InvalidArgument "cdr requires a non-empty list" t)
 
+car,cdr :: Errory r v w
+car = with1 "car" car'
+cdr = with1 "cdr" cdr'
 
--- car, cdr :: Term -> Erlish
--- car = with1 "car" $ \x -> case x of
---   E.List (h:_) -> return h
---   f -> throwE (InvalidArgument "car requires a non-empty list" f)
--- cdr = with1 "cdr" $ \x -> case x of
---   E.List (_:t) -> return $ E.List t
---   f -> throwE (InvalidArgument "cdr requires a non-empty list" f)
--- caar, cadr, cddr, cdar :: Term -> Erlish
--- caar t = car t >>= car
--- cadr t = cdr t >>= car
--- cddr t = cdr t >>= cdr
--- cdar t = car t >>= cdr
--- caaar, caadr, cadar, caddr, cdddr, cddar, cdaar, cdadr :: Term -> Erlish
--- caaar t = caar t >>= car
--- caadr t = cadr t >>= car
--- cadar t = cdar t >>= car
--- caddr t = cddr t >>= car
--- cdddr t = cddr t >>= cdr
--- cddar t = cdar t >>= cdr
--- cdaar t = caar t >>= cdr
--- cdadr t = cadr t >>= cdr
--- caaaar, caadar, cadaar, cadadr, caddar, cdaddr, cdaadr, cddadr, caaadr, caaddr, cadddr, cddddr, cdddar, cddaar, cdaaar, cdadar :: Term -> Erlish
--- caaaar t = caaar t >>= car
--- caaadr t = caadr t >>= car
--- caadar t = cadar t >>= cdr
--- caaddr t = caddr t >>= car
--- cadaar t = cdaar t >>= car
--- cadadr t = cdadr t >>= car
--- caddar t = cddar t >>= car
--- cadddr t = cdddr t >>= car
--- cdaaar t = caaar t >>= cdr
--- cdadar t = cadar t >>= cdr
--- cdaddr t = caddr t >>= cdr
--- cdaadr t = caadr t >>= cdr
--- cdddar t = cddar t >>= cdr
--- cddddr t = cdddr t >>= cdr
--- cddaar t = cdaar t >>= cdr
--- cddadr t = cdadr t >>= cdr
+caar, cadr, cddr, cdar :: Errory r v w
+caar t = car t >>= car
+cadr t = cdr t >>= car
+cddr t = cdr t >>= cdr
+cdar t = car t >>= cdr
 
--- cons :: E.Term -> Erlish
--- cons = with2 "cons" $ \x y -> case y of
---   E.List l -> return (E.List $ x:l)
---   f -> throwE (InvalidArgument "cons requires a list as second argument" f)
+caaar, caadr, cadar, caddr, cdddr, cddar, cdaar, cdadr :: Errory r v w
+caaar t = caar t >>= car
+caadr t = cadr t >>= car
+cadar t = cdar t >>= car
+caddr t = cddr t >>= car
+cdddr t = cddr t >>= cdr
+cddar t = cdar t >>= cdr
+cdaar t = caar t >>= cdr
+cdadr t = cadr t >>= cdr
 
--- quote :: E.Term -> Erlish
--- quote = with1 "quote" make
+caaaar, caadar, cadaar, cadadr, caddar, cdaddr, cdaadr, cddadr, caaadr, caaddr, cadddr, cddddr, cdddar, cddaar, cdaaar, cdadar :: Errory r v w
+caaaar t = caaar t >>= car
+caaadr t = caadr t >>= car
+caadar t = cadar t >>= cdr
+caaddr t = caddr t >>= car
+cadaar t = cdaar t >>= car
+cadadr t = cdadr t >>= car
+caddar t = cddar t >>= car
+cadddr t = cdddr t >>= car
+cdaaar t = caaar t >>= cdr
+cdadar t = cadar t >>= cdr
+cdaddr t = caddr t >>= cdr
+cdaadr t = caadr t >>= cdr
+cdddar t = cddar t >>= cdr
+cddddr t = cdddr t >>= cdr
+cddaar t = cdaar t >>= cdr
+cddadr t = cdadr t >>= cdr
 
--- list :: E.Term -> Erlish
--- list = withL "list" (return . E.List)
+cons' :: Term v w -> Errory r v w
+cons' x (List l w) = return (E.List (x:l) w)
+cons' _ t = throwError (InvalidArgument "cons requires a list as second argument" t)
+
+cons :: Errory r v w
+cons = with2 "cons" cons'
+
+quote :: Errory r v w
+quote = with1 "quote" return
+
+_export :: WithError r v w => Term v w -> Arr' r (Module v w)
+_export l@(E.List [_] _) _ = throwError (InvalidArgument msg l)
+  where msg = "export requires arguments. valid: * (foo 1 2) (foo *)"
+-- _export l@(E.List [_,(E.Atom "*" _)] _) m = 
+-- _export l@(E.List (_:is) _) m = ... -- 
+-- _exportMacros :: WithError r v w => Term v w -> Arr' r (Module v w)
+-- _exportMacros l@(E.List [] w) _ = throwError (InvalidArgument msg (E.List [(E.Atom "export-macros" w)] w))
+--   where msg = "export requires arguments. valid: * (foo 1 2) (foo *)"
+
+_dmList :: WithError r v w => Term v w -> Arr' r (Module v w)
+_dmList l@(E.List ((E.Atom "export" _):ts) _) m = _export l m
+--_dmList (E.List ((E.Atom "export-macros" _):ts) w) m = _export (E.List ts w) m
+
+-- Updates the module with a new piece of info from the defmodule form
+-- TODO: FIXME
+_dm :: WithError r v w => Term v w -> Arr' r (Module v w)
+-- _dm (E.List   l w) m =
+-- _dm (E.Map n w) m =
+-- _dm (E.Binary b w) m =
+_dm t _ = throwError (InvalidArgument "defmodule: expected list, map or binary" t)
+
+-- defmodule' :: forall r v w. Arr r [Term v w] (Term v w)
+-- defmodule' ((Atom a aw):rs) | validModuleName a =
+--   do let m = Module a M.empty (ModScope M.empty M.empty)
+     
+-- defmodule' t = throwError (InvalidArgument "The first argument to defmodule must be a valid module atom" t)
+
+-- defineMacro :: Text -> META
+--defineMacro name
+
+-- defmacro' :: forall r v w. Arr r [Term v w] (Term v w)
+-- defmacro' ((E.Atom a w):(E.List l _):(E.Binary b _):exprs) =
+--   do return (E.List [(E.Atom a w)] w)
+
+-- evalAll :: [Term v w] -> w -> Eff w (Term v w)
+-- evalAll ts w = mapM eval ts
+
+-- -- evalList :: forall v w. [Term v w] -> w -> Eff w (Term v w)
+-- -- evalList ts w =
+-- --   do let (h:t) = mapM eval ts 
+-- --      (Atom a w) <- findMacro @v @w h
+     
+     
+
+-- eval :: Arr r (Term v w) (Term v w)
+-- eval (List l w) = evalAll l w >>= evalList
+
+-- list :: Errory r v w
+-- list = withL "list" fmap E.List (mapM eval)
 
 -- tuple :: E.Term -> Erlish
 -- tuple = withL "tuple" (return . E.Tuple)

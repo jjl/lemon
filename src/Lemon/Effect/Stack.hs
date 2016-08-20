@@ -1,4 +1,4 @@
-{-# LANGUAGE AllowAmbiguousTypes, DataKinds, FlexibleContexts, TypeOperators #-}
+{-# LANGUAGE AllowAmbiguousTypes, ConstraintKinds, DataKinds, RankNTypes, FlexibleContexts, TypeOperators #-}
 module Lemon.Effect.Stack
   ( push, peek, pop -- , dup
   ) where
@@ -16,7 +16,8 @@ peek ::  Member (State [s]) r => Eff r s
 peek = get >>= \st -> case st of
   h1:_ -> return h1
 
-pop :: (Member (State [s]) r, Member (Exc (Error t)) r) => Eff r s
+pop :: forall r s t.
+       Members [State [s], Exc (Error t)] r => Eff r s
 pop = get >>= \st -> case st of
   h1:t@(_:_) -> put t >> return h1
   -- h:t -> return $ Exc StackEmpty
